@@ -98,10 +98,6 @@ type walker struct {
 type visitOpts struct {
 	// Flags are a bitmask of flags to affect behavior of this visit
 	Flags visitFlag
-
-	// Information about the struct containing this field
-	Struct      interface{}
-	StructField string
 }
 
 func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
@@ -175,28 +171,12 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		return h, nil
 
 	case reflect.Map:
-		var includeMap IncludableMap
-		if opts != nil && opts.Struct != nil {
-			if v, ok := opts.Struct.(IncludableMap); ok {
-				includeMap = v
-			}
-		}
 
 		// Build the hash for the map. We do this by XOR-ing all the key
 		// and value hashes. This makes it deterministic despite ordering.
 		var h uint64
 		for _, k := range v.MapKeys() {
 			v := v.MapIndex(k)
-			if includeMap != nil {
-				incl, err := includeMap.HashIncludeMap(
-					opts.StructField, k.Interface(), v.Interface())
-				if err != nil {
-					return 0, err
-				}
-				if !incl {
-					continue
-				}
-			}
 
 			kh, err := w.visit(k, nil)
 			if err != nil {
@@ -214,11 +194,6 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 		return h, nil
 
 	case reflect.Struct:
-		parent := v.Interface()
-		var include Includable
-		if impl, ok := parent.(Includable); ok {
-			include = impl
-		}
 
 		t := v.Type()
 		h, err := w.visit(reflect.ValueOf(t.Name()), nil)
@@ -253,17 +228,6 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 					}
 				}
 
-				// Check if we implement includable and check it
-				if include != nil {
-					incl, err := include.HashInclude(fieldType.Name, innerV)
-					if err != nil {
-						return 0, err
-					}
-					if !incl {
-						continue
-					}
-				}
-
 				switch tag {
 				case "set":
 					f |= visitFlagSet
@@ -275,9 +239,7 @@ func (w *walker) visit(v reflect.Value, opts *visitOpts) (uint64, error) {
 				}
 
 				vh, err := w.visit(innerV, &visitOpts{
-					Flags:       f,
-					Struct:      parent,
-					StructField: fieldType.Name,
+					Flags: f,
 				})
 				if err != nil {
 					return 0, err
